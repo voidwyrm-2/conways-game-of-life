@@ -11,7 +11,7 @@ const pixelscale int = 3
 
 var updatepixels bool = false
 
-type PixelSetting struct {
+type CellSetting struct {
 	x     int
 	y     int
 	state bool
@@ -32,7 +32,7 @@ func main() {
 
 	var board [bx][by]bool
 	//bpoint := &board
-	var presets = []PixelSetting{
+	var presets = []CellSetting{
 		{49, 49, true},
 		{51, 49, true},
 		{51, 50, true},
