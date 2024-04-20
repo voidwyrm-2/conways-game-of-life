@@ -1,23 +1,114 @@
 package main
 
 import (
+	"fmt"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 const bx = 100
 const by = 100
 
-const pixelscale int = 3
+var tickrate int = 10
+
+const pixelscale int = 5
 
 var updatepixels bool = false
 
+/*
 type CellSetting struct {
 	x     int
 	y     int
 	state bool
 }
+*/
+
+// taken from https://github.com/ThePrimeagen/game-of-life-vwm/blob/master/cmd/server.go
+var dirs = [][]int{
+	{-1, -1},
+	{0, -1},
+	{1, -1},
+	{1, 0},
+	{1, 1},
+	{0, 1},
+	{-1, 1},
+	{-1, 0},
+}
+
+// taken from https://github.com/ThePrimeagen/game-of-life-vwm/blob/master/cmd/server.go
+func getNeighborCount(state [by][bx]bool, x, y int) int {
+	count := 0
+	for _, d := range dirs {
+		row := y + d[0]
+		col := x + d[1]
+
+		if row < 0 || row >= len(state) {
+			continue
+		}
+
+		if col < 0 || col >= len(state[0]) {
+			continue
+		}
+
+		if state[row][col] {
+			count++
+		}
+	}
+	return count
+}
+
+// taken from https://github.com/ThePrimeagen/game-of-life-vwm/blob/master/cmd/server.go
+func stepBoard(state [by][bx]bool) [by][bx]bool {
+	var out [by][bx]bool
+	for y, row := range state {
+		for x := range row {
+			out[y][x] = state[y][x]
+
+			count := getNeighborCount(state, x, y)
+			if count < 2 || count > 3 {
+				out[y][x] = false
+			} else if count == 3 {
+				out[y][x] = true
+			}
+		}
+	}
+	return out
+}
+
+func clamp32(number, min, max int32) int32 {
+	if number < min {
+		return min
+	} else if number > max {
+		return max
+	} else {
+		return number
+	}
+}
+
+func clamp(number, min, max int) int {
+	if number < min {
+		return min
+	} else if number > max {
+		return max
+	} else {
+		return number
+	}
+}
+
+var windowX int32 = 1000
+var windowY int32 = 650
 
 func main() {
+
+	var savestate [by][bx]bool
+	var cansave = false
+
+	cannotLoadMessageTick := rl.NewColor(uint8(120), uint8(120), uint8(120), uint8(0))
+
+	LoadedMessageTick := rl.NewColor(uint8(120), uint8(120), uint8(120), uint8(0))
+
+	savedMessageTick := rl.NewColor(uint8(120), uint8(120), uint8(120), uint8(0))
+
 	/*// Create new parser object
 	parser := argparse.NewParser("clilexer", "lexes and prints the given string")
 	// Create string flag
@@ -30,25 +121,37 @@ func main() {
 		fmt.Print(parser.Usage(err))
 	}*/
 
-	var board [bx][by]bool
+	var board [by][bx]bool
 	//bpoint := &board
-	var presets = []CellSetting{
-		{49, 49, true},
-		{51, 49, true},
-		{51, 50, true},
-		{50, 50, true},
-		{50, 51, true},
-	}
-	rl.InitWindow(800, 450, "Conway's Game of Life")
+	/*
+		var presets = []CellSetting{
+			{9, 8, true},
+			{10, 9, true},
+			{10, 10, true},
+			{10, 11, true},
+			{9, 11, true},
+			{8, 11, true},
+			{7, 11, true},
+			{6, 10, true},
+			{6, 8, true},
+		}
+	*/
+	rl.InitWindow(windowX, windowY, "Conway's Game of Life")
 	defer rl.CloseWindow()
 
-	rl.SetTargetFPS(12)
+	rl.SetTargetFPS(60)
 
-	for _, p := range presets {
-		board[p.y][p.x] = p.state
-	}
+	/*
+		for _, p := range presets {
+			board[p.y][p.x] = p.state
+		}
+	*/
+
+	var tick int = 0
 
 	for !rl.WindowShouldClose() {
+		tickrate = clamp(tickrate, 0, 60)
+		tick++
 
 		if rl.IsKeyPressed(rl.KeySpace) && updatepixels {
 			updatepixels = false
@@ -56,75 +159,39 @@ func main() {
 			updatepixels = true
 		}
 
-		if !updatepixels {
-			rl.DrawText("Currently paused, press Space to upause", 190, 200, 20, rl.Gray)
+		if rl.IsKeyPressed(rl.KeyS) {
+			cansave = true
+			savestate = board
+			savedMessageTick.A = 150
 		}
 
-		if updatepixels {
-			var bylen int = len(board)
-			var bxlen int = len(board[0])
-			for y := range board {
-				for x := range board[y] {
-					var survivalQuotent int = 0
-					//var indexmargin int = 0
+		if rl.IsKeyPressed(rl.KeyL) && cansave && savestate != board {
+			board = savestate
+			//cansave = false
+			LoadedMessageTick.A = 150
+		} else if rl.IsKeyPressed(rl.KeyL) && (!cansave || savestate == board) {
+			cannotLoadMessageTick.A = 150
+		}
 
-					// check for cells horizontally and vertically
-					if x+1 < bxlen {
-						if board[y][x+1] {
-							survivalQuotent += 1
-						}
-					}
-					if x-1 > -1 {
-						if board[y][x-1] {
-							survivalQuotent += 1
-						}
-					}
-					if y+1 < bylen {
-						if board[y+1][x] {
-							survivalQuotent += 1
-						}
-					}
-					if y-1 > -1 {
-						if board[y-1][x] {
-							survivalQuotent += 1
-						}
-					}
+		if rl.IsKeyPressed(rl.KeyUp) {
+			tickrate++
+		} else if rl.IsKeyPressed(rl.KeyDown) {
+			tickrate--
+		}
 
-					// check for cells diagonally
-					if y+1 < bylen && x+1 < bxlen {
-						if board[y+1][x+1] {
-							survivalQuotent += 1
-						}
-					}
-					if y+1 < bylen && x-1 > -1 {
-						if board[y+1][x-1] {
-							survivalQuotent += 1
-						}
-					}
-					if y-1 > -1 && x+1 < bxlen {
-						if board[y-1][x+1] {
-							survivalQuotent += 1
-						}
-					}
-					if y-1 > -1 && x-1 > -1 {
-						if board[y-1][x-1] {
-							survivalQuotent += 1
-						}
-					}
-
-					if !board[y][x] {
-						if survivalQuotent == 3 {
-							board[y][x] = true
-						}
-					} else {
-						if survivalQuotent < 2 || survivalQuotent > 3 {
-							board[y][x] = false
-						} else if survivalQuotent == 2 || survivalQuotent == 3 {
-							continue
-						}
-					}
-				}
+		if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
+			mx := clamp32(rl.GetMouseX()/int32(pixelscale), 0, bx-1)
+			my := clamp32(rl.GetMouseY()/int32(pixelscale), 0, by-1)
+			if board[my][mx] {
+				board[my][mx] = false
+			} else {
+				board[my][mx] = true
 			}
+		}
+
+		if updatepixels && tick > tickrate {
+			board = stepBoard(board)
+			tick = 0
 		}
 
 		rl.BeginDrawing()
@@ -134,13 +201,37 @@ func main() {
 
 		for y, b1 := range board {
 			for x, b2 := range b1 {
-				pixcol := rl.Black
-				if b2 {
-					pixcol = rl.White
+				if !b2 {
+					continue
 				}
+				pixcol := rl.White
 
 				rl.DrawRectangle(int32(x*pixelscale), int32(y*pixelscale), int32(pixelscale), int32(pixelscale), pixcol)
 			}
+		}
+
+		if !updatepixels {
+			rl.DrawText("currently paused, press Space to unpause", 2, 5, 20, rl.Gray)
+		}
+
+		rl.DrawText(fmt.Sprint(tickrate), 2, 25, 20, rl.Gray)
+
+		rl.DrawText("current state saved", 2, windowY-30, 20, savedMessageTick)
+
+		rl.DrawText("loaded saved state", 2, windowY-60, 20, LoadedMessageTick)
+
+		rl.DrawText("unable to load save", 2, windowY-90, 20, cannotLoadMessageTick)
+
+		if savedMessageTick.A > 0 {
+			savedMessageTick.A--
+		}
+
+		if cannotLoadMessageTick.A > 0 {
+			cannotLoadMessageTick.A--
+		}
+
+		if LoadedMessageTick.A > 0 {
+			LoadedMessageTick.A--
 		}
 
 		rl.EndDrawing()
