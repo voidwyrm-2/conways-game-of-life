@@ -15,6 +15,168 @@ const pixelscale int = 5
 
 var updatepixels bool = false
 
+func clamp32(number, min, max int32) int32 {
+	if number < min {
+		return min
+	} else if number > max {
+		return max
+	} else {
+		return number
+	}
+}
+
+func getMousePixelPos() (int, int) {
+	return int(clamp32(rl.GetMouseX()/int32(pixelscale), 0, bx-1)), int(clamp32(rl.GetMouseY()/int32(pixelscale), 0, by-1))
+}
+
+func clamp(number, min, max int) int {
+	if number < min {
+		return min
+	} else if number > max {
+		return max
+	} else {
+		return number
+	}
+}
+
+type contruct struct { // used for creating things that can be placed as preset constructs, such as gliders, etc
+	ctype     string   // "Still Life", "Spaceship", etc
+	name      string   // "Glider", "Block", etc
+	rotatable bool     // for rotation, duh
+	positions [][2]int // stores the cell positions relative to the mouse position, so {1, -1} would be up and to the right of the mouse
+}
+
+func (c contruct) build(board [bx][by]bool) ([bx][by]bool, bool) {
+	out := board
+	for _, pos := range c.positions {
+		mx, my := getMousePixelPos()
+		px := pos[0]
+		py := pos[1]
+		if my+py > len(board)-1 || mx-px > len(board[0])-1 {
+			return board, true
+		}
+		if my+py < 0 || mx-px < 0 {
+			return board, true
+		}
+		out[my+py][mx-px] = true
+	}
+	return out, false
+}
+
+var constructs = []contruct{
+	// Still Lifes
+	{
+		"Still Life",
+		"Block",
+		true,
+		[][2]int{
+			{0, 0},
+			{1, -1},
+			{0, -1},
+			{1, 0},
+		},
+	},
+	{
+		"Still Life",
+		"Beehive",
+		true,
+		[][2]int{
+			{1, -1},
+			{1, 1},
+			{0, -1},
+			{0, 1},
+			{-1, 0},
+			{2, 0},
+		},
+	},
+	/*
+		{
+			"Still Life",
+			"Crab",
+			true,
+			[][2]int{
+				{-1, 1},
+				{-1, -1},
+				{0, 1},
+				{0, -1},
+				{1, 0},
+				{-2, 0},
+			},
+		},
+	*/
+
+	// Oscillators
+	{
+		"Oscillator",
+		"Blinker",
+		true,
+		[][2]int{
+			{0, 0},
+			{-1, 0},
+			{1, 0},
+		},
+	},
+
+	// Spaceships
+	{
+		"Spaceship",
+		"Glider",
+		true,
+		[][2]int{
+			{0, 0},
+			{1, -1},
+			{-1, 0},
+			{-1, -1},
+			{0, 1},
+		},
+	},
+
+	// Expanders
+	{
+		"Expander",
+		"Blinker(4)",
+		true,
+		[][2]int{
+			{0, 0},
+			{1, 0},
+			{0, -1},
+			{0, 1},
+		},
+	},
+	{
+		"Expander",
+		"Beehive(4)",
+		true,
+		[][2]int{
+			{0, 0},
+			{1, -1},
+			{1, 1},
+			{0, -1},
+			{0, 1},
+			{-1, 0},
+			{2, 0},
+		},
+	},
+
+	// Decayers
+	{
+		"Decayer",
+		"Tuning Fork",
+		true,
+		[][2]int{
+			{0, -2},
+			{1, -1},
+			{-1, -1},
+			{1, 0},
+			{-1, 0},
+			{1, 1},
+			{-1, 1},
+			{1, 2},
+			{-1, 2},
+		},
+	},
+}
+
 /*
 type CellSetting struct {
 	x     int
@@ -75,25 +237,11 @@ func stepBoard(state [by][bx]bool) [by][bx]bool {
 	return out
 }
 
-func clamp32(number, min, max int32) int32 {
-	if number < min {
-		return min
-	} else if number > max {
-		return max
-	} else {
-		return number
-	}
-}
+var holdingShift bool = false
 
-func clamp(number, min, max int) int {
-	if number < min {
-		return min
-	} else if number > max {
-		return max
-	} else {
-		return number
-	}
-}
+var constructIndex int = 0
+
+var constructorMode bool = false
 
 var windowX int32 = 1000
 var windowY int32 = 650
@@ -109,6 +257,8 @@ func main() {
 
 	savedMessageTick := rl.NewColor(uint8(120), uint8(120), uint8(120), uint8(0))
 
+	cBuildFailedMessageTick := rl.NewColor(uint8(120), uint8(120), uint8(120), uint8(0))
+
 	/*// Create new parser object
 	parser := argparse.NewParser("clilexer", "lexes and prints the given string")
 	// Create string flag
@@ -122,41 +272,79 @@ func main() {
 	}*/
 
 	var board [by][bx]bool
-	//bpoint := &board
-	/*
-		var presets = []CellSetting{
-			{9, 8, true},
-			{10, 9, true},
-			{10, 10, true},
-			{10, 11, true},
-			{9, 11, true},
-			{8, 11, true},
-			{7, 11, true},
-			{6, 10, true},
-			{6, 8, true},
-		}
-	*/
 	rl.InitWindow(windowX, windowY, "Conway's Game of Life")
 	defer rl.CloseWindow()
 
 	rl.SetTargetFPS(60)
 
-	/*
-		for _, p := range presets {
-			board[p.y][p.x] = p.state
-		}
-	*/
-
 	var tick int = 0
 
+	rl.InitAudioDevice()
+
+	music_main := rl.LoadMusicStream("./Conways Game of Life.mp3")
+
+	pause := true
+
+	//rl.PlayMusicStream(music_main)
+
 	for !rl.WindowShouldClose() {
+		constructIndex = clamp(constructIndex, 0, len(constructs)-1)
 		tickrate = clamp(tickrate, 0, 60)
 		tick++
+
+		rl.UpdateMusicStream(music_main)
+
+		if rl.IsKeyPressed(rl.KeyP) {
+			constructorMode = !constructorMode
+		}
+
+		if rl.IsKeyPressed(rl.KeyM) {
+			pause = !pause
+			if pause {
+				rl.PauseMusicStream(music_main)
+			} else {
+				rl.PlayMusicStream(music_main)
+			}
+		}
+
+		if rl.IsKeyPressed(rl.KeyRight) {
+			if holdingShift {
+				oldCtype := constructs[constructIndex].ctype
+				for constructs[constructIndex].ctype == oldCtype {
+					if constructIndex+1 > len(constructs)-1 {
+						break
+					}
+					constructIndex++
+				}
+
+			} else {
+				constructIndex = clamp(constructIndex+1, 0, len(constructs)-1)
+			}
+
+		} else if rl.IsKeyPressed(rl.KeyLeft) {
+			if holdingShift {
+				oldCtype := constructs[constructIndex].ctype
+				for constructs[constructIndex].ctype == oldCtype {
+					if constructIndex-1 < 0 {
+						break
+					}
+					constructIndex--
+				}
+			} else {
+				constructIndex = clamp(constructIndex-1, 0, len(constructs)-1)
+			}
+		}
 
 		if rl.IsKeyPressed(rl.KeySpace) && updatepixels {
 			updatepixels = false
 		} else if rl.IsKeyPressed(rl.KeySpace) && !updatepixels {
 			updatepixels = true
+		}
+
+		if rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift) {
+			holdingShift = true
+		} else {
+			holdingShift = false
 		}
 
 		if rl.IsKeyPressed(rl.KeyS) {
@@ -180,12 +368,26 @@ func main() {
 		}
 
 		if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
-			mx := clamp32(rl.GetMouseX()/int32(pixelscale), 0, bx-1)
-			my := clamp32(rl.GetMouseY()/int32(pixelscale), 0, by-1)
+			if constructorMode {
+				tempboard, failed := constructs[constructIndex].build(board)
+				if failed {
+					cBuildFailedMessageTick.A = 150
+				} else {
+					board = tempboard
+				}
+			} else {
+				mx, my := getMousePixelPos()
+				if !board[my][mx] {
+					board[my][mx] = true
+				}
+
+			}
+		}
+
+		if rl.IsMouseButtonPressed(rl.MouseButtonRight) {
+			mx, my := getMousePixelPos()
 			if board[my][mx] {
 				board[my][mx] = false
-			} else {
-				board[my][mx] = true
 			}
 		}
 
@@ -214,6 +416,10 @@ func main() {
 			rl.DrawText("currently paused, press Space to unpause", 2, 5, 20, rl.Gray)
 		}
 
+		if constructorMode {
+			rl.DrawText(fmt.Sprintf("current construct is '%s'('%s')", constructs[constructIndex].name, constructs[constructIndex].ctype), 2, 50, 15, rl.Gray)
+		}
+
 		rl.DrawText(fmt.Sprint(tickrate), 2, 25, 20, rl.Gray)
 
 		rl.DrawText("current state saved", 2, windowY-30, 20, savedMessageTick)
@@ -221,6 +427,8 @@ func main() {
 		rl.DrawText("loaded saved state", 2, windowY-60, 20, LoadedMessageTick)
 
 		rl.DrawText("unable to load save", 2, windowY-90, 20, cannotLoadMessageTick)
+
+		rl.DrawText("unable to build construct", 2, windowY-120, 20, cBuildFailedMessageTick)
 
 		if savedMessageTick.A > 0 {
 			savedMessageTick.A--
@@ -234,6 +442,16 @@ func main() {
 			LoadedMessageTick.A--
 		}
 
+		if cBuildFailedMessageTick.A > 0 {
+			cBuildFailedMessageTick.A--
+		}
+
 		rl.EndDrawing()
 	}
+
+	//rl.UnloadMusicStream(music_main)
+
+	//rl.CloseAudioDevice()
+
+	//rl.CloseWindow()
 }
